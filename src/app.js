@@ -283,6 +283,7 @@ $('joinRoom').onclick = function () {
     hostConn.on('close', function () { toast('ホストとの接続が切れました'); });
   }
   peer.on('open', connect);
+  if (PARTY) var watch = setInterval(function () { if (lobby || G) { clearInterval(watch); return; } if (peer.open && !(hostConn && hostConn.open)) { try { hostConn && hostConn.close(); } catch (e) {} connect(); } }, FuuParty.watchMs);   // みんなの部屋：取りこぼし対策
   peer.on('error', function (e) { if (e.type === 'peer-unavailable' && PARTY && !lobby && ++ptries < FuuParty.retries) { toast('ホストを待っています…'); setTimeout(connect, FuuParty.retryMs); return; } toast(e.type === 'peer-unavailable' ? 'その部屋が見つかりません' : '通信エラー：' + e.type); });
 };
 function send(m) { if (hostConn && hostConn.open) hostConn.send(m); else toast('つながっていません'); }
