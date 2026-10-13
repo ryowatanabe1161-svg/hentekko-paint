@@ -701,6 +701,7 @@ var E = { LV: LV, CHARS: CHARS, expand: expand, norm: norm, loadWords: loadWords
 root.HPE = E; if (typeof module !== 'undefined') module.exports = E;
 })(typeof window !== 'undefined' ? window : globalThis);
 </script>
+<script src="../fuusan-games/party.js"></script>
 <script>/* へんてこペイント：画面・お絵かきパッド・オンライン（PeerJS, ホストが正） */
 'use strict';
 var $ = function (id) { return document.getElementById(id); };
@@ -921,15 +922,16 @@ var ID_PREFIX = 'hentekko-v1-', CODE_CH = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 var ICE = Q.get('ice') ? Q.get('ice').split(',').map(function (u) { return { urls: u }; }) : [{ urls: 'stun:stun.l.google.com:19302' }];
 var PEER_OPTS = { debug: 1, config: { iceServers: ICE } };
 if (Q.get('peerhost')) { PEER_OPTS.host = Q.get('peerhost'); PEER_OPTS.port = +Q.get('peerport'); PEER_OPTS.path = Q.get('peerpath') || '/'; PEER_OPTS.secure = false; }
+var PARTY = window.FuuParty && window.FuuParty.info;   // ひろばの「みんなの部屋」から来たとき
 var peer = null, conns = [], hostConn = null, lobby = null, roomCode = '';
 function genCode() { var s = ''; for (var i = 0; i < 4; i++) s += CODE_CH[Math.floor(Math.random() * CODE_CH.length)]; return s; }
 function myName() { var n = $('onName').value.trim().slice(0, 10); if (!n) { toast('なまえを入れてね'); return null; } localStorage.setItem('hp_name', n); return n; }
 $('mkRoom').onclick = function () {
-  var nm = myName(); if (!nm) return; mode = 'host'; roomCode = Q.get('code') || genCode();
+  var nm = myName(); if (!nm) return; mode = 'host'; roomCode = (PARTY && PARTY.host) ? PARTY.code : (Q.get('code') || genCode());
   lobby = [{ name: nm, emoji: '🙂', seat: 'host' }];
   peer = new Peer(ID_PREFIX + roomCode, PEER_OPTS);
   peer.on('open', function () { renderLobby(); });
-  peer.on('error', function (e) { if (e.type === 'unavailable-id') { roomCode = genCode(); toast('コードを作り直します'); setTimeout(function () { $('mkRoom').onclick(); }, 300); } else toast('通信エラー：' + e.type); });
+  peer.on('error', function (e) { if (e.type === 'unavailable-id' && PARTY) { try { peer.destroy(); } catch (x) {} toast('部屋を開いています…'); setTimeout(function () { $('mkRoom').onclick(); }, 2500); } else if (e.type === 'unavailable-id') { roomCode = genCode(); toast('コードを作り直します'); setTimeout(function () { $('mkRoom').onclick(); }, 300); } else toast('通信エラー：' + e.type); });
   peer.on('connection', function (c) {
     c.on('data', function (m) { hostRecv(c, m); });
     c.on('close', function () { conns = conns.filter(function (x) { return x !== c; }); if (lobby && !G) { lobby = lobby.filter(function (p) { return p.seat !== c.peer; }); renderLobby(); } });
@@ -973,19 +975,30 @@ $('copyLink').onclick = function () { var u = location.origin + location.pathnam
 $('joinRoom').onclick = function () {
   var nm = myName(); if (!nm) return; var code = $('onCode').value.trim().toUpperCase(); if (code.length < 4) return toast('部屋コードを入れてね');
   mode = 'client'; roomCode = code; peer = new Peer(PEER_OPTS); toast('つないでいます…');
-  peer.on('open', function () { hostConn = peer.connect(ID_PREFIX + code, { reliable: true });
+  var ptries = 0;
+  function connect() { hostConn = peer.connect(ID_PREFIX + code, { reliable: true });
     hostConn.on('open', function () { hostConn.send({ t: 'hello', name: nm }); });
     hostConn.on('data', function (m) {
-      if (m.t === 'lobby') { lobby = m.players; renderLobby(); }
+      if (m.t === 'fuu-goto') { if (PARTY) FuuParty.handle(m); }
+      else if (m.t === 'lobby') { lobby = m.players; renderLobby(); }
       else if (m.t === 'state') { G = m.g; mySeat = m.seat; render(); }
       else if (m.t === 'err') { toast(m.msg); setTimeout(function () { location.href = location.pathname; }, 1800); }
     });
     hostConn.on('close', function () { toast('ホストとの接続が切れました'); });
-  });
-  peer.on('error', function (e) { toast(e.type === 'peer-unavailable' ? 'その部屋が見つかりません' : '通信エラー：' + e.type); });
+  }
+  peer.on('open', connect);
+  peer.on('error', function (e) { if (e.type === 'peer-unavailable' && PARTY && !lobby && ++ptries < FuuParty.retries) { toast('ホストを待っています…'); setTimeout(connect, FuuParty.retryMs); return; } toast(e.type === 'peer-unavailable' ? 'その部屋が見つかりません' : '通信エラー：' + e.type); });
 };
 function send(m) { if (hostConn && hostConn.open) hostConn.send(m); else toast('つながっていません'); }
-if (Q.get('room')) { $('onCode').value = Q.get('room'); $('goOnline').onclick(); }
+// ---- ひろばの「みんなの部屋」：同じメンバーで自動入室＋ホストは「つぎのゲーム」 ----
+if (PARTY) {
+  FuuParty.init({ game: 'hentekko-paint',
+    isHost: function () { return mode === 'host'; },
+    canSwitch: function () { return mode !== 'host' || !G || G.phase === 'end'; },
+    broadcast: function (m) { conns.forEach(function (c) { try { c.send(m); } catch (e) {} }); } });
+  $('goOnline').onclick(); $('onName').value = PARTY.name || 'ななし';
+  if (PARTY.host) $('mkRoom').onclick(); else { $('onCode').value = PARTY.code; $('joinRoom').onclick(); }
+} else if (Q.get('room')) { $('onCode').value = Q.get('room'); $('goOnline').onclick(); }
 
 /* タイトルのお絵かきデモ */
 (function () { var cv = $('titleCv'), i = 0, list = E.shuffle(W.filter(function (w) { return !w.hard; })).slice(0, 12);
