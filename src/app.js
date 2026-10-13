@@ -293,6 +293,7 @@ if (PARTY) {
     isHost: function () { return mode === 'host'; },
     canSwitch: function () { return mode !== 'host' || !G || G.phase === 'end'; },
     broadcast: function (m) { conns.forEach(function (c) { try { c.send(m); } catch (e) {} }); } });
+  FuuParty.status = function () { return mode === 'host' ? { host: 1, n: conns.filter(function (c) { return c.open; }).length } : { host: 0, joined: !!(lobby || G) }; };
   $('goOnline').onclick(); $('onName').value = PARTY.name || 'ななし';
   if (PARTY.host) $('mkRoom').onclick(); else { $('onCode').value = PARTY.code; $('joinRoom').onclick(); }
 } else if (Q.get('room')) { $('onCode').value = Q.get('room'); $('goOnline').onclick(); }
